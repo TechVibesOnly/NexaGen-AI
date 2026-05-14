@@ -1,0 +1,358 @@
+// NeXaGen AI - Finalized Enterprise Prisma Schema
+// Optimized for Multi-Tenant Partitioning, Compliance, and Industry-Specific Intelligence
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// --- CORE ENUMS ---
+
+enum UserRole {
+  ADMIN
+  MANAGER
+  ANALYST
+  FIELD_USER
+}
+
+enum Vertical {
+  CROPMIND
+  BUILDIQ
+  LEXCORE
+  GOVPULSE
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum Status {
+  ACTIVE
+  INACTIVE
+  PENDING
+  ARCHIVED
+  COMPLETED
+}
+
+// --- MULTI-TENANT & AUTH CORE ---
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String
+  vertical    Vertical
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  users       User[]
+  apiKeys     ApiKey[]
+  auditLogs   AuditLog[]
+
+  // Vertical Relations
+  farms       Farm[]
+  projects    Project[]
+  contracts   Contract[]
+  cases       LegalCase[]
+  agencies    Agency[]
+
+  @@index([vertical])
+}
+
+model User {
+  id             String       @id @default(cuid())
+  email          String       @unique
+  passwordHash   String
+  firstName      String?
+  lastName       String?
+  role           UserRole     @default(ANALYST)
+  isActive       Boolean      @default(true)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  
+  auditLogs      AuditLog[]
+  sessions       Session[]
+  
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
+  @@index([email])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([token])
+}
+
+model ApiKey {
+  id             String       @id @default(cuid())
+  key            String       @unique
+  name           String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  lastUsedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([key])
+}
+
+// --- AUDIT & COMPLIANCE ---
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  action         String       // e.g., "AI_PREDICT", "EXPORT_PII"
+  entityType     String       
+  entityId       String?
+  userId         String?
+  user           User?        @relation(fields: [userId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  metadata       String?      // JSON-stringified context (IP, UserAgent, Diffs)
+  severity       RiskLevel    @default(LOW)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([action])
+}
+
+// --- VERTICAL: CROPMIND (Agriculture) ---
+
+model Farm {
+  id             String       @id @default(cuid())
+  name           String
+  location       String?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  fields         Field[]
+  
+  @@index([organizationId])
+}
+
+model Field {
+  id          String   @id @default(cuid())
+  name        String
+  cropType    String
+  soilType    String?
+  farmId      String
+  farm        Farm     @relation(fields: [farmId], references: [id])
+  
+  sensorLogs  SensorLog[]
+  pestAlerts  PestAlert[]
+  predictions YieldPrediction[]
+
+  @@index([farmId])
+}
+
+model SensorLog {
+  id          String   @id @default(cuid())
+  fieldId     String
+  field       Field    @relation(fields: [fieldId], references: [id])
+  type        String   // Moisture, NPK, PH
+  value       Float
+  timestamp   DateTime @default(now())
+
+  @@index([fieldId])
+  @@index([timestamp])
+}
+
+model YieldPrediction {
+  id          String   @id @default(cuid())
+  fieldId     String
+  field       Field    @relation(fields: [fieldId], references: [id])
+  yieldMetric Float
+  confidence  Float
+  timestamp   DateTime @default(now())
+
+  @@index([fieldId])
+}
+
+model PestAlert {
+  id          String    @id @default(cuid())
+  fieldId     String
+  field       Field     @relation(fields: [fieldId], references: [id])
+  pestType    String
+  severity    RiskLevel
+  status      Status    @default(PENDING)
+  createdAt   DateTime  @default(now())
+
+  @@index([fieldId])
+}
+
+// --- VERTICAL: BUILDIQ (Construction) ---
+
+model Project {
+  id             String       @id @default(cuid())
+  name           String
+  status         Status       @default(ACTIVE)
+  priority       RiskLevel    @default(MEDIUM)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  sites          Site[]
+  tasks          ConstructionTask[]
+
+  @@index([organizationId])
+}
+
+model Site {
+  id          String   @id @default(cuid())
+  name        String
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id])
+  
+  safetyIncidents SafetyIncident[]
+  materials       MaterialInventory[]
+
+  @@index([projectId])
+}
+
+model ConstructionTask {
+  id          String    @id @default(cuid())
+  name        String
+  status      Status    @default(PENDING)
+  priority    RiskLevel @default(MEDIUM)
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  dueDate     DateTime?
+
+  @@index([projectId])
+}
+
+model SafetyIncident {
+  id          String    @id @default(cuid())
+  siteId      String
+  site        Site      @relation(fields: [siteId], references: [id])
+  severity    RiskLevel
+  description String
+  status      Status    @default(PENDING)
+  timestamp   DateTime  @default(now())
+
+  @@index([siteId])
+}
+
+model MaterialInventory {
+  id          String   @id @default(cuid())
+  siteId      String
+  site        Site     @relation(fields: [siteId], references: [id])
+  sku         String
+  quantity    Float
+  unit        String
+  reorderPoint Float   @default(10)
+  updatedAt   DateTime @updatedAt
+
+  @@index([siteId])
+}
+
+// --- VERTICAL: LEXCORE (Legal) ---
+
+model Contract {
+  id             String       @id @default(cuid())
+  title          String
+  status         Status       @default(PENDING)
+  riskScore      Float?
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  clauses        RiskClause[]
+
+  @@index([organizationId])
+}
+
+model LegalCase {
+  id             String       @id @default(cuid())
+  title          String
+  caseNumber     String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  research       LegalResearch[]
+
+  @@index([organizationId])
+}
+
+model RiskClause {
+  id          String   @id @default(cuid())
+  contractId  String
+  contract    Contract @relation(fields: [contractId], references: [id])
+  content     String
+  riskLevel   RiskLevel
+  remediation String?
+
+  @@index([contractId])
+}
+
+model LegalResearch {
+  id          String    @id @default(cuid())
+  caseId      String
+  case        LegalCase @relation(fields: [caseId], references: [id])
+  query       String
+  summary     String
+  sources     String?   // JSON-stringified URLs/Sources
+  createdAt   DateTime  @default(now())
+
+  @@index([caseId])
+}
+
+// --- VERTICAL: GOVPULSE (Government) ---
+
+model Agency {
+  id             String       @id @default(cuid())
+  name           String
+  code           String       @unique
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  assets         InfraAsset[]
+  simulations    PolicySimulation[]
+  fraudReports   FraudAnalysis[]
+
+  @@index([organizationId])
+}
+
+model InfraAsset {
+  id          String   @id @default(cuid())
+  name        String
+  type        String
+  condition   Float    // 0-100 score
+  agencyId    String
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  lastScanned DateTime @default(now())
+
+  @@index([agencyId])
+}
+
+model PolicySimulation {
+  id          String   @id @default(cuid())
+  name        String
+  impactScore Float
+  budgetDelta Float
+  agencyId    String
+  agency      Agency   @relation(fields: [agencyId], references: [id])
+  results     String?  // JSON analysis summary
+  createdAt   DateTime @default(now())
+
+  @@index([agencyId])
+}
+
+model FraudAnalysis {
+  id          String    @id @default(cuid())
+  title       String
+  riskLevel   RiskLevel @default(HIGH)
+  status      Status    @default(ACTIVE)
+  agencyId    String
+  agency      Agency    @relation(fields: [agencyId], references: [id])
+  detectedAt  DateTime  @default(now())
+
+  @@index([agencyId])
+}
